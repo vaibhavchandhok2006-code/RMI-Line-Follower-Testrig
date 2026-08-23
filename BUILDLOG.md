@@ -8,7 +8,7 @@ Progressive log of design decisions, what was tried, what changed, and why.
 - Started learning Github.
 - Set up this GitHub repo.
 
-### Aug ~10-13 — Kinematics deep-dive
+### Aug ~10-13 — Kinematics
 - Learnt about differential  drive kinematics.
 - Worked through how sensor mounting offset from the wheel axis affects control
 
