@@ -3,7 +3,7 @@
 ## Overview
 Differential-drive line-following robot built as a part of RMI Testrig. Follows a 38mm black line through a hostile track (sharp corners, junctions), runs an exploration round to build a track map, then executes an optimized second run using path-planning on the discovered graph.
 
-**Status as of [DATE]:** Design review stage — CAD assembly and circuit design complete, firmware development starting next.
+Design review stage — CAD assembly and circuit design complete, firmware development starting next.
 
 ## Repo Structure
 - `/cad` — SolidWorks assembly + exported STL files, chassis, motor mounts, sensor mount
