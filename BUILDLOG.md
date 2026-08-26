@@ -42,7 +42,29 @@ Progressive log of design decisions, what was tried, what changed, and why.
 
 ### Aug 23 — Design review
 
----
+### Aug 26 — Circuit reiteration: component spec audit
+
+Design review on the 23rd landed mid-CT, so a lot of it was deadline-chasing rather than actually thinking things through. Today's the real reiteration pass — went back to first-party specs for every major component instead of the assumed numbers from before.
+
+- **RLS-08 IR array**: 100–150mA draw, rated 5V, gives 0–5V analog out (per Robu.in). Also runs at 3.3V, but only if the LED current-limiting resistor stage (two-stage arrangement on-board) is shorted/bypassed — needs on-board soldering rework.(to be confirmed)
+  - If the bypass works: 3.3V is sufficient, no voltage divider needed on the 8 analog lines.
+  - If not: fall back to 5V off the buck converter + 8× voltage dividers to bring the ADC lines to 3.3V logic.
+  - Not decided yet — will try the 3.3V supply.
+- **N20 motor**: 6V rated, 200RPM. No-load current 30mA, rated 60mA, stall 230mA.
+- **N20 encoder**: red/blue = GND + motor power, black = encoder VCC (3.3–5V logic), yellow/green = signal feedback (logic-high tracks whatever VCC is supplied). Going with 3.3V logic to match ESP32 GPIOs directly.
+- **TB6612FNG driver**: 1.2A continuous / 3.2A peak per channel, Vmotor max 15V, logic supply 2.7–5.5V. Logic-high threshold is 0.7×VCC — this is the actual reason 3.3V logic was chosen over 5V: at 3.3V VCC the threshold sits low enough for ESP32's native 3.3V GPIO high to drive it cleanly. At 5V VCC, the threshold would sit above what a 3.3V GPIO can output.
+- **Battery**: 7.4V 2S LiPo, 850mAh, 25C continuous / 50C burst, ~21A max discharge.
+- **ESP32**: onboard LDO accepts 5–12V in, fed from the buck-converted 5V rail → 3.3V LDO out. Max output 250mA , per GPIO - 20mA recommended, Wi-Fi/BT TX peak current 240–500mA — factored into the current budget.
+- **Buck converter (LM2596)**: 2A continuous, 3A max — heatsink required above ~2A.
+
+**Open question:** whether to feed the raw 7.4V LiPo rail straight into ESP32 Vin. Technically within the 5–12V input range but still need to confirm , some online source suggested that ideally 5-7V should be fed into esp32 LDO.
+
+Updated circuit architecture diagram reflects all of the above: 7.4V rail → power switch → splits three ways (buck → 5V rail, direct to motor driver Vm, divider → battery-voltage ADC). Pin assignments locked: encoders on GPIO13/14/27/26, motor driver PWM+direction on 16/17/18/21/22/23, RLS-08 analog on GPIO32-39 (ADC1), push button + status LED on 2/4/5.
+
+Next: once the RLS-08 power path is settled , will move to CAD assemble re - ideation .
 
 ## not yet resolved
+- RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
+- ESP32 Vin: raw 7.4V LiPo direct vs regulated 5V rail — undecided (raw only possible if the rls sensor runs at 3.3V)
 - Firmware / ESP-IDF development has not yet started
+
