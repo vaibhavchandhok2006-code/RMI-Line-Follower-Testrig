@@ -93,6 +93,7 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 <img width="1033" height="716" alt="image" src="https://github.com/user-attachments/assets/cc73a375-0408-4ce3-8a2b-10d4de3223b7" />
 
 **Chasis Main Back Plate**
+
 <img width="608" height="560" alt="image" src="https://github.com/user-attachments/assets/42123887-d6b8-4801-8923-a7390f19f48e" />
 
 **Adjustable IR Sensor array part with Castor wheel and cutting grooves**
