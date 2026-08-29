@@ -77,6 +77,7 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 - Previous version was one full rectangular block, which carried dead weight on either side of the motors for no reason. New version thins those sections down to just what the motor mounts need, cutting that mass out.
 - PCB footprint minimized to 80mm × 60mm to keep mass down; PCB sits on standoffs ~1.5–2cm above the plate.
 - 4mm thick, printed at 60% infill.
+- The PCB Mounting fall are made as slots rather than fixed holes if a smaller PCB is possible to make it can mounted and hence the mounting holes are adjustable.
 
 **Adjustable IR sensor arm:**
 - Look-ahead distance adjustable from 8cm to 20cm, with 1cm-spaced grooves as cut guides. Once track calibration shows the ideal look-ahead distance, the arm gets trimmed to length and bolted to the chassis plate through two front mounting holes.
@@ -88,9 +89,15 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 
 **Custom CAD parts modeled from scratch** (no usable models existed online): LiPo battery, caster wheel, IR sensor array — built to complete the full assembly for fit-checking.
 
-![Full chassis assembly](cad/renders/chassis_assembly.png)
-![Back chassis plate — top view](cad/renders/back_plate_top.png)
-![Adjustable IR sensor arm](cad/renders/sensor_arm.png)
+**Full assembly**
+<img width="1033" height="716" alt="image" src="https://github.com/user-attachments/assets/cc73a375-0408-4ce3-8a2b-10d4de3223b7" />
+
+**Chasis Main Back Plate**
+<img width="608" height="560" alt="image" src="https://github.com/user-attachments/assets/42123887-d6b8-4801-8923-a7390f19f48e" />
+
+**Adjustable IR Sensor array part with Castor wheel and cutting grooves**
+<img width="915" height="550" alt="image" src="https://github.com/user-attachments/assets/012f56c6-bd82-4157-8dd6-064fbe0eb37d" />
+
 
 ## not yet resolved
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
