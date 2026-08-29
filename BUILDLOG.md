@@ -99,6 +99,15 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 **Adjustable IR Sensor array part with Castor wheel and cutting grooves**
 <img width="915" height="550" alt="image" src="https://github.com/user-attachments/assets/012f56c6-bd82-4157-8dd6-064fbe0eb37d" />
 
+**Chassis assembly complete, all parts 3D printed**
+- All chassis parts printed in PLA 3D Printer and assembled: baseplate, N20 motor mounts, wheels, caster mount.
+- Final assembly photo:
+<img width="3296" height="2686" alt="IMG_20260829_163451 jpg" src="https://github.com/user-attachments/assets/a01a2c25-733a-4b43-b0bb-c1a91124235f" />
+
+
+- Mechanical build phase complete. Moving into electronics wiring and ESP-IDF firmware development next.
+
+
 
 ## not yet resolved
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
