@@ -73,7 +73,7 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 1. **Back chassis plate** — motor mounts + PCB area + battery mount
 2. **Adjustable IR sensor arm** — separate piece, bolts on
 
-**Back chassis plate:**
+**Back chassis plate**
 - Previous version was one full rectangular block, which carried dead weight on either side of the motors for no reason. New version thins those sections down to just what the motor mounts need, cutting that mass out.
 - PCB footprint minimized to 80mm × 60mm to keep mass down; PCB sits on standoffs ~1.5–2cm above the plate.
 - 4mm thick, printed at 60% infill.
