@@ -63,6 +63,35 @@ Updated circuit architecture diagram reflects all of the above: 7.4V rail → po
 
 Next: once the RLS-08 power path is settled , will move to CAD assemble re - ideation .
 
+### Aug 27–29 — Chassis v2: split design, adjustable sensor arm
+
+(Didn't log day-by-day through this stretch — heads-down on CAD. Catching up in one entry covering the full 3-day iteration.)
+
+The previous chassis was rushed to hit the design review deadline and wasn't actually good. This is the real redesign.
+
+**Split into two parts** instead of one solid baseplate:
+1. **Back chassis plate** — motor mounts + PCB area + battery mount
+2. **Adjustable IR sensor arm** — separate piece, bolts on
+
+**Back chassis plate:**
+- Previous version was one full rectangular block, which carried dead weight on either side of the motors for no reason. New version thins those sections down to just what the motor mounts need, cutting that mass out.
+- PCB footprint minimized to 80mm × 60mm to keep mass down; PCB sits on standoffs ~1.5–2cm above the plate.
+- 4mm thick, printed at 60% infill.
+
+**Adjustable IR sensor arm:**
+- Look-ahead distance adjustable from 8cm to 20cm, with 1cm-spaced grooves as cut guides. Once track calibration shows the ideal look-ahead distance, the arm gets trimmed to length and bolted to the chassis plate through two front mounting holes.
+- Originally planned to mount this *below* the back plate, but that removed the ground clearance for the sensor head and removed any adjustability — moved it above instead.
+- 3mm thick (kept minimal since it's not load-bearing), printed at 70–80% infill to compensate for the reduced thickness.
+- Caster wheel sits directly below the arm's front section, with a 2mm gap between the arm's underside and the caster when mounted. No threaded mount for the caster — will be secured with double-sided tape instead of screws.
+
+**Test prints completed:** caster wheel mounting hole, bolt diameter tolerances, IR sensor array mount. Final full-chassis prints still pending.
+
+**Custom CAD parts modeled from scratch** (no usable models existed online): LiPo battery, caster wheel, IR sensor array — built to complete the full assembly for fit-checking.
+
+![Full chassis assembly](cad/renders/chassis_assembly.png)
+![Back chassis plate — top view](cad/renders/back_plate_top.png)
+![Adjustable IR sensor arm](cad/renders/sensor_arm.png)
+
 ## not yet resolved
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
 - ESP32 Vin: raw 7.4V LiPo direct vs regulated 5V rail — undecided (raw only possible if the rls sensor runs at 3.3V)
