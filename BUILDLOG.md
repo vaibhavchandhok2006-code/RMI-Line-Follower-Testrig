@@ -112,6 +112,8 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 - Wrote first "Hello World" program to confirm the flash/build/monitor workflow.
 - Wrote first LED blink program using raw GPIO driver calls (gpio_reset_pin, gpio_set_level, vTaskDelay) instead of Arduino's digitalWrite/delay abstractions.
 - Decision: spending few days on ESP-IDF fundamentals before touching sensor/motor code, given how different the peripheral driver model is from Arduino. Following an online ESP-IDF tutorial series to build this foundation properly rather than rushing into the project code cold.
+- Learned to configure and control multiple output pins .
+- Learned digital input handling — reading a push button through ESP-IDF's GPIO input configuration (pull-up/pull-down config, gpio_get_level()).
 
 ## not yet resolved
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
