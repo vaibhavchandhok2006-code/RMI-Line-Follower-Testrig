@@ -111,7 +111,7 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 - ESP-IDF installed and toolchain working (separate learning curve from Arduino IDE — different build system, no hand-holding on peripheral config).
 - Wrote first "Hello World" program to confirm the flash/build/monitor workflow.
 - Wrote first LED blink program using raw GPIO driver calls (gpio_reset_pin, gpio_set_level, vTaskDelay) instead of Arduino's digitalWrite/delay abstractions.
-- Decision: spending ~1 week on ESP-IDF fundamentals before touching sensor/motor code, given how different the peripheral driver model is from Arduino. Following an online ESP-IDF tutorial series to build this foundation properly rather than rushing into the project code cold.
+- Decision: spending few days on ESP-IDF fundamentals before touching sensor/motor code, given how different the peripheral driver model is from Arduino. Following an online ESP-IDF tutorial series to build this foundation properly rather than rushing into the project code cold.
 
 ## not yet resolved
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
