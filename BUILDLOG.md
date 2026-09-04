@@ -115,6 +115,16 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 - Learned to configure and control multiple output pins .
 - Learned digital input handling — reading a push button through ESP-IDF's GPIO input configuration (pull-up/pull-down config, gpio_get_level()).
 
+### Sep 3-4 — PWM/LEDC control, first real ESP-IDF build issue
+- Learned to control LED brightness via PWM using ESP-IDF's LEDC peripheral driver.
+- Hit the first real build failure of the project: `fatal error: driver/ledc.h: No such file or directory`.
+
+**Debugging it:**
+- Environment: ESP-IDF v6.0.2, ESP32, VS Code + ESP-IDF extension, Windows.
+- Root cause: `main/CMakeLists.txt` used `REQUIRES driver`, which worked in older IDF versions where all peripheral drivers lived in one monolithic `driver` component. In v6.0.2, this has been split into per-peripheral components (`esp_driver_gpio`, `esp_driver_spi`, `esp_driver_ledc`, etc.) — `driver` no longer automatically pulls in LEDC, so the compiler couldn't find `ledc.h`.
+- Fix: updated `main/CMakeLists.txt` to `REQUIRES esp_driver_ledc` explicitly, then ran build to force CMake to fully re-resolve component dependencies.
+- Result: build succeeded, LEDC header and API resolved correctly.
+
 ## not yet resolved
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
 - ESP32 Vin: raw 7.4V LiPo direct vs regulated 5V rail — undecided (raw only possible if the rls sensor runs at 3.3V)
