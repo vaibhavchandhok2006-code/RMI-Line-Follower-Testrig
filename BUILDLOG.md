@@ -119,11 +119,12 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 - Learned to control LED brightness via PWM using ESP-IDF's LEDC peripheral driver.
 - Hit the first real build failure of the project: `fatal error: driver/ledc.h: No such file or directory`.
 
-**Debugging it:**
-- Environment: ESP-IDF v6.0.2, ESP32, VS Code + ESP-IDF extension, Windows.
-- Root cause: `main/CMakeLists.txt` used `REQUIRES driver`, which worked in older IDF versions where all peripheral drivers lived in one monolithic `driver` component. In v6.0.2, this has been split into per-peripheral components (`esp_driver_gpio`, `esp_driver_spi`, `esp_driver_ledc`, etc.) — `driver` no longer automatically pulls in LEDC, so the compiler couldn't find `ledc.h`.
-- Fix: updated `main/CMakeLists.txt` to `REQUIRES esp_driver_ledc` explicitly, then ran build to force CMake to fully re-resolve component dependencies.
-- Result: build succeeded, LEDC header and API resolved correctly.
+### Sep 9 — Sensor hardware setback, motor control confirmed working
+- Discovered a hardware fault on the RLS-08: connecting 5V and GND caused the ESP32/Arduino power supply itself to browning out/switch off — strongly indicates a short on the sensor board, not a wiring or code issue on my end.
+- As a temporary workaround, tested a spare 5-channel digital IR sensor module. Digital reads worked correctly in firmware, but the board itself is unusable for this project: its onboard threshold-setting potentiometer was never soldered at the factory, so there's no way to calibrate detection thresholds on it.
+- Decision: waiting for the RLS-08 to be audited/replaced rather than building around the substitute digital board. The project spec explicitly requires a continuous weighted position estimate, which a digital (on/off per channel) sensor fundamentally cannot provide regardless of calibration — so this isn't a workaround worth forcing, it's the wrong sensor type for the requirement.
+- Meanwhile, progressed on a parallel subsystem: single motor (Motor A) digital control via TB6612FNG fully working — forward/stop/reverse cycle confirmed on real hardware, STBY/AIN1/AIN2/PWMA wiring and control logic verified correct.
+- Next: motor B, then PWM speed control layered on top of the working digital control, while sensor hardware issue is resolved in parallel.
 
 ## not yet resolved
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
