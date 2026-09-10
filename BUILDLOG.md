@@ -126,6 +126,34 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 - Meanwhile, progressed on a parallel subsystem: single motor (Motor A) digital control via TB6612FNG fully working — forward/stop/reverse cycle confirmed on real hardware, STBY/AIN1/AIN2/PWMA wiring and control logic verified correct.
 - Next: motor B, then PWM speed control layered on top of the working digital control, while sensor hardware issue is resolved in parallel.
 
+## [10th September 2026] - Motor Control Hardware Drivers, PWM Integration & Firmware Repo Setup
+
+### Summary
+Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM speed control using ESP-IDF's LEDC peripheral. Structured the initialization routines into clean setup functions and integrated the local project folder into the main GitHub repository structure.
+
+
+### Hardware & Pins Configured
+* **Motor A (Left Drive):** `PWMA` (GPIO 16), `AIN1` (GPIO 17), `AIN2` (GPIO 18)
+* **Motor B (Right Drive):** `PWMB` (GPIO 19), `BIN1` (GPIO 21), `BIN2` (GPIO 22)
+* **Driver Control:** `STBY` (GPIO 23)
+
+### Firmware Implementation Details
+1. **GPIO & Direction Control:** Configured directional H-Bridge outputs (`AIN1/2`, `BIN1/2`) and driver enable (`STBY`) using `driver/gpio.h`.
+2. **LEDC Hardware PWM Integration:** 
+   * Configured `LEDC_TIMER_0` in `LEDC_LOW_SPEED_MODE` running at **5 kHz** to eliminate audible motor whine.
+   * Configured **10-bit resolution** (duty cycle values from `0` to `1023`).
+   * Linked `LEDC_CHANNEL_0` to Motor A (`PWMA`) and `LEDC_CHANNEL_1` to Motor B (`PWMB`).
+3. **Control Routines:**
+   * Modularized setup into `gpio_init()`, `pwm_init()`, and a master `motor_system_init()` sequence to prevent floating pin motor twitching on startup.
+   * Created safe dynamic motor functions (`set_motor_a_speed`, `set_motor_b_speed`) with speed range clamping protection.
+
+
+### Challenges & Resolutions
+* **Git Remote Conflict (`non-fast-forward`):** Encountered push rejections due to diverged history between remote updates (`BUILDLOG.md`) and local files. Resolved using `git pull origin main --allow-unrelated-histories`.
+* **File Structure Merge Conflict:** Conflict arose over `firmware/.gitignore` present in both local and remote branches. Aborted rebase, resolved conflicts, and staged manually using `git add .` and a merge commit.
+* **Line Ending Conversion (CRLF/LF):** Handled cross-platform line ending normalization warnings during Git staging on Windows.
+* **IntelliSense Include Path Warnings:** Identified red squiggly lines under `#include <driver/gpio.h>` as VS Code header resolution warnings caused by file directory restructuring; verified code compilation independently.
+
 ## not yet resolved
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
 - ESP32 Vin: raw 7.4V LiPo direct vs regulated 5V rail — undecided (raw only possible if the rls sensor runs at 3.3V)
