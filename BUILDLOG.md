@@ -126,11 +126,10 @@ The previous chassis was rushed to hit the design review deadline and wasn't act
 - Meanwhile, progressed on a parallel subsystem: single motor (Motor A) digital control via TB6612FNG fully working — forward/stop/reverse cycle confirmed on real hardware, STBY/AIN1/AIN2/PWMA wiring and control logic verified correct.
 - Next: motor B, then PWM speed control layered on top of the working digital control, while sensor hardware issue is resolved in parallel.
 
-## [10th September 2026] - Motor Control Hardware Drivers, PWM Integration & Firmware Repo Setup
+## 10th September 2026 - Motor Control Hardware Drivers, PWM Integration & Firmware Repo Setup
 
 ### Summary
 Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM speed control using ESP-IDF's LEDC peripheral. Structured the initialization routines into clean setup functions and integrated the local project folder into the main GitHub repository structure.
-
 
 ### Hardware & Pins Configured
 * **Motor A (Left Drive):** `PWMA` (GPIO 16), `AIN1` (GPIO 17), `AIN2` (GPIO 18)
@@ -146,7 +145,6 @@ Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM 
 3. **Control Routines:**
    * Modularized setup into `gpio_init()`, `pwm_init()`, and a master `motor_system_init()` sequence to prevent floating pin motor twitching on startup.
    * Created safe dynamic motor functions (`set_motor_a_speed`, `set_motor_b_speed`) with speed range clamping protection.
-
 
 ### Challenges & Resolutions
 * **Git Remote Conflict (`non-fast-forward`):** Encountered push rejections due to diverged history between remote updates (`BUILDLOG.md`) and local files. Resolved using `git pull origin main --allow-unrelated-histories`.
