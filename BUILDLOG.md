@@ -137,7 +137,7 @@ Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM 
 * **Driver Control:** `STBY` (GPIO 23)
 
 ### Firmware Implementation Details
-1. **GPIO & Direction Control:** Configured directional H-Bridge outputs (`AIN1/2`, `BIN1/2`) and driver enable (`STBY`) using `driver/gpio.h`.
+1. **GPIO & Direction Control:** Configured directional H-Bridge outputs (`AIN1/2`, `BIN1/2`) and driver enable (`STBY`).
 2. **LEDC Hardware PWM Integration:** 
    * Configured `LEDC_TIMER_0` in `LEDC_LOW_SPEED_MODE` running at **5 kHz** to eliminate audible motor whine.
    * Configured **10-bit resolution** (duty cycle values from `0` to `1023`).
