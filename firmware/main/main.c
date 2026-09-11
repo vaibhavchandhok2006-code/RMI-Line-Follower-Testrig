@@ -1,3 +1,4 @@
+//Including the libraries
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -7,13 +8,21 @@
 
 static const char *TAG = "MOTOR_TEST";
 
+enum RobotState {
+IDLE,
+CALIBRATING,
+RUNNING,
+LINELOST,
+STOPPED
+};
+
+RobotState currentState = IDLE;
+
 // Pin Definitions
 #define PWMA GPIO_NUM_16 
 #define AIN1 GPIO_NUM_17 
 #define AIN2 GPIO_NUM_18
-
 #define STBY GPIO_NUM_23   
-
 #define PWMB GPIO_NUM_19  
 #define BIN1 GPIO_NUM_21 
 #define BIN2 GPIO_NUM_22   
@@ -26,7 +35,27 @@ static const char *TAG = "MOTOR_TEST";
 #define LEDC_CHANNEL_MOTOR_A  LEDC_CHANNEL_0
 #define LEDC_CHANNEL_MOTOR_B  LEDC_CHANNEL_1
 
-// Safe helper to set Motor A speed with boundary protection
+//Function to update the states containting the logic
+void update_state(){
+}
+
+//Function to execute actions corresponding to each states
+void execute_state(){
+switch(currentState){
+    case IDLE:
+
+    case CALIBRATING:
+
+    case RUNNING:
+
+    case LINELOST:
+
+    case STOPPED:
+}
+
+}
+
+//set Motor A speed
 void set_motor_a_speed(uint32_t duty)
 {
     if (duty > 1023) duty = 1023; // Clamp value to bit-resolution maximum
@@ -34,7 +63,7 @@ void set_motor_a_speed(uint32_t duty)
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_MOTOR_A);
 }
 
-// Safe helper to set Motor B speed with boundary protection
+//set Motor B speed 
 void set_motor_b_speed(uint32_t duty)
 {
     if (duty > 1023) duty = 1023;
@@ -42,7 +71,7 @@ void set_motor_b_speed(uint32_t duty)
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_MOTOR_B);
 }
 
-// Function to initialize directional GPIO pins securely
+// Function to initialize directional GPIO pins 
 void gpio_init(void)
 {
     uint64_t pin_mask = (1ULL << AIN1) | (1ULL << AIN2) | 
@@ -99,7 +128,7 @@ void pwm_init(void)
     ledc_channel_config(&pwm_b_channel);
 }
 
-// Master initialization routine
+// Full system initialize
 void motor_system_init(void)
 {
     gpio_init();
