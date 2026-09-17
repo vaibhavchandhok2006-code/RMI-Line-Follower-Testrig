@@ -156,3 +156,24 @@ Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM 
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
 - ESP32 Vin: raw 7.4V LiPo direct vs regulated 5V rail — undecided (raw only possible if the rls sensor runs at 3.3V)
 
+### Sep 17 — Motor driver integration confirmed, borrowed RLS-08 for sensor code testing, baseline subtraction issue diagnosed
+
+**Motor control — done, encoders not yet integrated**
+- Motor driver (TB6612FNG) integration confirmed working on real hardware: forward, reverse, and stop all verified with both motors under LEDC PWM control.
+- Encoders not wired in yet — motor motion currently open-loop, no speed/position feedback. Consistent with the roadmap: encoders are a deferred stretch item (odometry), not required for core.
+
+**Sensor testing — using a borrowed RLS-08, own unit still not delivered**
+- My own RLS-08 hasn't arrived yet. Borrowed another RMI member's RLS-08 unit specifically to test and develop the sensor-reading code against real hardware in the meantime, rather than staying blocked.
+- Ran the 8-channel sensor test code (6ch on ADC1, 2ch on ADC2) against the borrowed array and logged real readings across a range of hand-swept positions over the line.
+
+**Diagnosed: white-baseline subtraction issue**
+- Logged data showed the line (black) consistently read higher than background (white), confirming correct polarity — no inversion needed in the weighted-position formula.
+- However, all sensors carried a substantial baseline offset (~80-100 raw counts) even on plain white background. Since the weighted-average formula divides by the sum of all raw readings, this baseline was diluting the effective signal — reworking one logged example (strong left-side line detection) showed the computed position was roughly 3x weaker than physically expected once the baseline was accounted for by hand.
+- Root cause: sensor readings were being used raw/uncalibrated, with no per-sensor min/max subtraction or normalization. This is exactly the calibration requirement the spec mandates, now confirmed empirically rather than just theoretically.
+- Also observed: sensor-to-sensor baseline varies by 10-20 raw counts even on identical white background — consistent with expected manufacturing/mounting variation discussed earlier, reinforces need for *per-sensor* calibration rather than a single shared threshold.
+- Observed contrast (white vs black) is currently small in absolute terms, and improves when sensor height is reduced. Decision: check for an onboard gain trimmer before lowering mount height further, since height reduction trades contrast for ground clearance against the paper track's bends/folds.
+
+**Next**
+- Timer-based calibration routine (3s countdown + sweep window, no button) written to replace raw readings with per-sensor normalized 0-1000 values before computing weighted position — addresses the baseline issue directly.
+- Still pending: own RLS-08 arrival, physical calibration validation on final hardware, PID gain tuning once calibrated position feed is trustworthy.
+
