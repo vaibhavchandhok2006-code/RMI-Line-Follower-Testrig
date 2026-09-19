@@ -156,3 +156,50 @@ Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM 
 - RLS-08 power path: 3.3V direct (needs resistor-stage bypass mod) vs 5V + 8× voltage dividers — pending 3.3V feasibility test
 - ESP32 Vin: raw 7.4V LiPo direct vs regulated 5V rail — undecided (raw only possible if the rls sensor runs at 3.3V)
 
+### Sep 17 — Motor driver integration confirmed, borrowed RLS-08 for sensor code testing, baseline subtraction issue diagnosed
+
+**Motor control — done, encoders not yet integrated**
+- Motor driver (TB6612FNG) integration confirmed working on real hardware: forward, reverse, and stop all verified with both motors under LEDC PWM control.
+- Encoders not wired in yet — motor motion currently open-loop, no speed/position feedback. Consistent with the roadmap: encoders are a deferred stretch item (odometry), not required for core.
+
+**Sensor testing — using a borrowed RLS-08, own unit still not delivered**
+- My own RLS-08 hasn't arrived yet. Borrowed another RMI member's RLS-08 unit specifically to test and develop the sensor-reading code against real hardware in the meantime, rather than staying blocked.
+- Ran the 8-channel sensor test code (6ch on ADC1, 2ch on ADC2) against the borrowed array and logged real readings across a range of hand-swept positions over the line.
+
+**Diagnosed: white-baseline subtraction issue**
+- Logged data showed the line (black) consistently read higher than background (white), confirming correct polarity — no inversion needed in the weighted-position formula.
+- However, all sensors carried a substantial baseline offset (~80-100 raw counts) even on plain white background. Since the weighted-average formula divides by the sum of all raw readings, this baseline was diluting the effective signal — reworking one logged example (strong left-side line detection) showed the computed position was roughly 3x weaker than physically expected once the baseline was accounted for by hand.
+- Root cause: sensor readings were being used raw/uncalibrated, with no per-sensor min/max subtraction or normalization. This is exactly the calibration requirement the spec mandates, now confirmed empirically rather than just theoretically.
+- Also observed: sensor-to-sensor baseline varies by 10-20 raw counts even on identical white background — consistent with expected manufacturing/mounting variation discussed earlier, reinforces need for *per-sensor* calibration rather than a single shared threshold.
+- Observed contrast (white vs black) is currently small in absolute terms, and improves when sensor height is reduced. Decision: check for an onboard gain trimmer before lowering mount height further, since height reduction trades contrast for ground clearance against the paper track's bends/folds.
+
+### Sep 18 — Rebuilt on new breadboard, borrowed sensor calibration tested, key diagnostic on position range
+
+**Hardware changes**
+- Rebuilt the full circuit on a different breadboard (previous one belonged to another member). Re-wired motors, driver, and the borrowed I2C/analog sensor array from scratch.
+- Sensor array VIN wired to 5-6V, analog outputs to ADC-capable GPIOs as before.
+
+**Sensor height tuning**
+- At ~1-2mm mounting height, readings were extremely sensitive: a slight fold in the flex track caused raw values to jump from ~200 to 2000-3000, making the signal unusable.
+- Taped and flattened the flex track to the floor to remove fold-induced noise at the source, rather than relying on software to compensate.
+- Settled on ~5-6mm mounting height as a deliberate compromise: raw contrast is weaker than at 1-2mm, but the reading is far more stable against small surface imperfections. Chose robustness over maximum contrast.
+- Noted raw ADC values are compressed to roughly 50-200 out of the 0-4095 range even at the higher contrast extreme — this sensor's native contrast is low regardless of height, consistent with it being a borrowed unit rather than the intended RLS-08.
+
+**Calibration routine refined**
+- Settled on a physical sweep method: both wheels kept in contact with the ground, sliding the whole chassis left-to-right slowly by hand. Deliberately avoided a rotational/arc sweep after testing it — rotating caused the sensor array to lift slightly off the surface, corrupting the calibration exactly as predicted.
+- Ran the button-toggled calibration code (min/max per sensor, mapped to 0-1000) successfully. Logged full calibration runs.
+
+**Diagnosed: compressed position range (~±12 instead of the full ±52.5 weight range)**
+- Analyzed logged data: even at maximum observed swing, multiple adjacent sensors carry substantial signal simultaneously rather than one sensor dominating cleanly. This compresses the weighted-average centroid well below the geometric extreme.
+- Root cause identified as the sensor's weak native contrast (confirmed by the 50-200 raw range) causing a broad, overlapping reflectance response across multiple channels, rather than a sharp per-sensor on/off falloff -- not a bug in the position-calculation math.
+- Confirmed this is acceptable for control purposes regardless: the position value is monotonic and repeatable, particularly well-behaved near center ("once center reads near zero, it works almost everywhere"), which is what PID actually needs -- full range utilization is not a requirement.
+  <img width="1006" height="183" alt="image" src="https://github.com/user-attachments/assets/f4c5b049-758a-4e39-9e0b-8f09aba09e2d" />
+
+<img width="900" height="1600" alt="WhatsApp Image 2026-09-19 at 2 22 29 PM" src="https://github.com/user-attachments/assets/a508fbf5-20f5-4ffc-a766-b3f0eb28f91f" />
+
+**Next**
+- Built first closed-loop version: calibrated weighted position feeding a PID controller directly into differential motor speeds (base speed +/- correction), with the motor driver held in standby during calibration and only enabled once calibration completes.
+- Starting tuning with conservative base speed and Kp, Ki/Kd at zero, to be raised incrementally once basic tracking is confirmed on hardware.
+
+
+
