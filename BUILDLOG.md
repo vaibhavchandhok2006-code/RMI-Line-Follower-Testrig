@@ -173,7 +173,33 @@ Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM 
 - Also observed: sensor-to-sensor baseline varies by 10-20 raw counts even on identical white background — consistent with expected manufacturing/mounting variation discussed earlier, reinforces need for *per-sensor* calibration rather than a single shared threshold.
 - Observed contrast (white vs black) is currently small in absolute terms, and improves when sensor height is reduced. Decision: check for an onboard gain trimmer before lowering mount height further, since height reduction trades contrast for ground clearance against the paper track's bends/folds.
 
+### Sep 18 — Rebuilt on new breadboard, borrowed sensor calibration tested, key diagnostic on position range
+
+**Hardware changes**
+- Rebuilt the full circuit on a different breadboard (previous one belonged to another member). Re-wired motors, driver, and the borrowed I2C/analog sensor array from scratch.
+- Sensor array VIN wired to 5-6V, analog outputs to ADC-capable GPIOs as before.
+
+**Sensor height tuning**
+- At ~1-2mm mounting height, readings were extremely sensitive: a slight fold in the flex track caused raw values to jump from ~200 to 2000-3000, making the signal unusable.
+- Taped and flattened the flex track to the floor to remove fold-induced noise at the source, rather than relying on software to compensate.
+- Settled on ~5-6mm mounting height as a deliberate compromise: raw contrast is weaker than at 1-2mm, but the reading is far more stable against small surface imperfections. Chose robustness over maximum contrast.
+- Noted raw ADC values are compressed to roughly 50-200 out of the 0-4095 range even at the higher contrast extreme — this sensor's native contrast is low regardless of height, consistent with it being a borrowed unit rather than the intended RLS-08.
+
+**Calibration routine refined**
+- Settled on a physical sweep method: both wheels kept in contact with the ground, sliding the whole chassis left-to-right slowly by hand. Deliberately avoided a rotational/arc sweep after testing it — rotating caused the sensor array to lift slightly off the surface, corrupting the calibration exactly as predicted.
+- Ran the button-toggled calibration code (min/max per sensor, mapped to 0-1000) successfully. Logged full calibration runs.
+
+**Diagnosed: compressed position range (~±12 instead of the full ±52.5 weight range)**
+- Analyzed logged data: even at maximum observed swing, multiple adjacent sensors carry substantial signal simultaneously rather than one sensor dominating cleanly. This compresses the weighted-average centroid well below the geometric extreme.
+- Root cause identified as the sensor's weak native contrast (confirmed by the 50-200 raw range) causing a broad, overlapping reflectance response across multiple channels, rather than a sharp per-sensor on/off falloff -- not a bug in the position-calculation math.
+- Confirmed this is acceptable for control purposes regardless: the position value is monotonic and repeatable, particularly well-behaved near center ("once center reads near zero, it works almost everywhere"), which is what PID actually needs -- full range utilization is not a requirement.
+  <img width="1006" height="183" alt="image" src="https://github.com/user-attachments/assets/f4c5b049-758a-4e39-9e0b-8f09aba09e2d" />
+
+<img width="900" height="1600" alt="WhatsApp Image 2026-09-19 at 2 22 29 PM" src="https://github.com/user-attachments/assets/a508fbf5-20f5-4ffc-a766-b3f0eb28f91f" />
+
 **Next**
-- Timer-based calibration routine (3s countdown + sweep window, no button) written to replace raw readings with per-sensor normalized 0-1000 values before computing weighted position — addresses the baseline issue directly.
-- Still pending: own RLS-08 arrival, physical calibration validation on final hardware, PID gain tuning once calibrated position feed is trustworthy.
+- Built first closed-loop version: calibrated weighted position feeding a PID controller directly into differential motor speeds (base speed +/- correction), with the motor driver held in standby during calibration and only enabled once calibration completes.
+- Starting tuning with conservative base speed and Kp, Ki/Kd at zero, to be raised incrementally once basic tracking is confirmed on hardware.
+
+
 
