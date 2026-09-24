@@ -51,7 +51,7 @@ static volatile bool button_pressed  = false;
  * ========================================================================= */
 #define AIN1      GPIO_NUM_17
 #define AIN2      GPIO_NUM_18
-#define BIN1      GPIO_NUM_21
+#define BIN1      GPIO_NUM_13
 #define BIN2      GPIO_NUM_22
 #define STBY      GPIO_NUM_23
 #define PWMA_PIN  GPIO_NUM_16
@@ -60,13 +60,13 @@ static volatile bool button_pressed  = false;
 // PWM Parameters for Speed Control
 #define LEDC_MODE       LEDC_LOW_SPEED_MODE
 #define LEDC_TIMER      LEDC_TIMER_0
-#define LEDC_DUTY_RES   LEDC_TIMER_10_BIT  // Resolution: 0 to 1023
+#define LEDC_DUTY_RES   LEDC_TIMER_10_BIT  // Resolution: 0 to 33
 #define LEDC_FREQUENCY  5000               // Frequency: 5000 Hz
 #define CHANNEL_A       LEDC_CHANNEL_0
 #define CHANNEL_B       LEDC_CHANNEL_1
 
-#define MAX_DUTY        818                // ~80% max motor speed limit
-#define BASE_SPEED      250                // Default forward speed
+#define MAX_DUTY        1023               // ~80% max motor speed limit
+#define BASE_SPEED      1000                // Default forward speed
 
 /* =========================================================================
  * 3. PID CONTROLLER STRUCT & STATE
@@ -81,9 +81,9 @@ typedef struct {
 } pid_t;
 
 static pid_t line_pid = {
-    .kp             = 8.0f,
+    .kp             = 55.0f,
     .ki             = 0.0f,
-    .kd             = 0.0f,
+    .kd             = 1.5f,
     .integral       = 0.0f,
     .prev_error     = 0.0f,
     .integral_limit = 50.0f
