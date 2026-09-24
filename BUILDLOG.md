@@ -197,9 +197,26 @@ Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM 
 
 <img width="900" height="1600" alt="WhatsApp Image 2026-09-19 at 2 22 29 PM" src="https://github.com/user-attachments/assets/a508fbf5-20f5-4ffc-a766-b3f0eb28f91f" />
 
-**Next**
-- Built first closed-loop version: calibrated weighted position feeding a PID controller directly into differential motor speeds (base speed +/- correction), with the motor driver held in standby during calibration and only enabled once calibration completes.
-- Starting tuning with conservative base speed and Kp, Ki/Kd at zero, to be raised incrementally once basic tracking is confirmed on hardware.
+### Sep 21 — Exploration research, Algorithm 1 vs 2 overview & track loop conflict
+
+**Research paper review & algorithm overview**
+- Reviewed a senior's research paper on line-maze solving to understand potential exploration strategies ahead of the Sept 30 core deadline.
+- **Algorithm 1 (Fixed Preference / Stack Backtracking):**
+  - Uses no wheel encoders or $(x, y)$ coordinate tracking; relies purely on binary junction triggers and dead-end backtracking.
+  - *Limitation:* Built for simple tree-structured mazes. Assumes every bad path ends in a dead end that forces a backtrack.
+- **Algorithm 2 (Coordinate Mapping & Dijkstra):**
+  - Requires wheel encoders, compass heading, and trigonometric path-length correction to cross-reference coordinates and detect loop closures.
+  - *Note:* Encoders remain un-wired on the current chassis, making Algorithm 2 a heavy addition to implement within the days left.
+
+**Track overview & potential conflict**
+- Looked at the official track layout: features a connected grid network with multi-intersecting closed loops at the bottom, alongside special geometry (diamond cutouts, circular loops).
+- *Key Takeaway:* Standard Algorithm 1 (and pure LSRB) will fail on this track layout. Because intersecting loops feed back into previously visited paths without dead-ending, fixed-preference rules will cause the robot to get trapped in infinite orbits.
+
+**Revised algorithm plan & progress status**
+- Need to properly read through the rest of the paper and examine a lightweight loop-handling exploration algorithm that handles closed loops without requiring hardware encoders.
+- Exploration phase remains aligned with the Sept 25–28 roadmap window.
+- Hardware status: Encoders remain dropped as a stretch goal; perfboard/power supply fabrication deferred as low-risk mechanical work to protect algorithm development time.
+- *Next Step:* Complete the pending hardware test for binary junction detection before writing the exploration logic.
 
 
 
