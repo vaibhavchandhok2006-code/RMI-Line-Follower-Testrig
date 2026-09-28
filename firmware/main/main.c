@@ -2,10 +2,11 @@
  * ESP32 Line Follower Robot
  * Features:
  * - 8 Sensor Line Position Detection
- * - 2-Button Control State Machine (GPIO 4: Calibration Toggle, GPIO 5: Run Toggle)
+ * - Single-Button Control State Machine (GPIO 4: Cycles IDLE -> CALIB -> IDLE -> RUN -> IDLE)
+ * - Software Debounced Hardware Interrupts via Microsecond Timer
  * - Status LEDs (GPIO 2: Calibration Status, GPIO 0: Run Status)
  * - Closed-Loop PID Control (Filtered Derivative + Anti-Windup)
- * - Binary Junction Detection Logging
+ * - 8-Bit Visual Binary Pattern Sensor Logging (e.g. 01110000)
  */
 
 #include <stdio.h>
@@ -14,6 +15,7 @@
 #include "freertos/task.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 
@@ -25,9 +27,9 @@ static const char *TAG = "LINE_FOLLOWER";
 #define NUM_SENSORS        8
 #define INVERT_LINE_LOGIC  false
 
-// Control Buttons (Toggle Mode)
-#define BTN_CALIB_GPIO     GPIO_NUM_4
-#define BTN_RUN_GPIO       GPIO_NUM_15 
+// Single Control Button (GPIO 4)
+#define BTN_SINGLE_GPIO    GPIO_NUM_4
+#define DEBOUNCE_TIME_MS   300 // Minimum time between valid button presses
 
 // Status LEDs
 #define LED_CALIB_GPIO     GPIO_NUM_2
@@ -35,7 +37,7 @@ static const char *TAG = "LINE_FOLLOWER";
 
 // ADC Channels assigned to sensors (6 on ADC1, 2 on ADC2)
 static const adc_channel_t adc1_channels[6] = {
-ADC_CHANNEL_0, ADC_CHANNEL_3, ADC_CHANNEL_6,
+    ADC_CHANNEL_0, ADC_CHANNEL_3, ADC_CHANNEL_6,
     ADC_CHANNEL_7, ADC_CHANNEL_4, ADC_CHANNEL_5
 };
 static const adc_channel_t adc2_channels[2] = {
@@ -65,8 +67,7 @@ typedef enum {
 } robot_state_t;
 
 static volatile robot_state_t robot_state = ROBOT_STATE_IDLE;
-static volatile bool btn_calib_pressed = false;
-static volatile bool btn_run_pressed   = false;
+static volatile bool btn_pressed = false;
 
 /* =========================================================================
  * 3. MOTOR CONTROL & PWM CONFIGURATION
@@ -118,24 +119,25 @@ static pid_t line_pid = {
 };
 
 /* =========================================================================
- * 5. INTERRUPT SERVICE ROUTINES & BUTTONS
+ * 5. INTERRUPT SERVICE ROUTINES & DEBOUNCED SINGLE BUTTON
  * ========================================================================= */
+static volatile uint64_t last_btn_time_ms = 0;
+
 static void IRAM_ATTR button_isr_handler(void* arg)
 {
-    uint32_t gpio_num = (uint32_t) arg;
-    if (gpio_num == BTN_CALIB_GPIO) {
-        btn_calib_pressed = true;
-    } else if (gpio_num == BTN_RUN_GPIO) {
-        btn_run_pressed = true;
+    uint64_t now_ms = esp_timer_get_time() / 1000;
+
+    // Hard hardware lock-out directly inside ISR context
+    if ((now_ms - last_btn_time_ms) > DEBOUNCE_TIME_MS) {
+        btn_pressed = true;
+        last_btn_time_ms = now_ms;
     }
 }
 
 void buttons_init(void)
 {
-    uint64_t bit_mask = (1ULL << BTN_CALIB_GPIO) | (1ULL << BTN_RUN_GPIO);
-
     gpio_config_t io_conf = {
-        .pin_bit_mask = bit_mask,
+        .pin_bit_mask = (1ULL << BTN_SINGLE_GPIO),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -144,8 +146,7 @@ void buttons_init(void)
     gpio_config(&io_conf);
 
     gpio_install_isr_service(0);
-    gpio_isr_handler_add(BTN_CALIB_GPIO, button_isr_handler, (void*) BTN_CALIB_GPIO);
-    gpio_isr_handler_add(BTN_RUN_GPIO,   button_isr_handler, (void*) BTN_RUN_GPIO);
+    gpio_isr_handler_add(BTN_SINGLE_GPIO, button_isr_handler, (void*) BTN_SINGLE_GPIO);
 }
 
 /* =========================================================================
@@ -178,7 +179,6 @@ void update_leds(void)
             break;
 
         case ROBOT_STATE_CALIBRATING:
-            // Blink Calibration LED every 250ms
             blink_counter++;
             gpio_set_level(LED_CALIB_GPIO, (blink_counter / 12) % 2);
             gpio_set_level(LED_RUN_GPIO, 0);
@@ -404,56 +404,66 @@ void drive(int left_speed, int right_speed)
 }
 
 /* =========================================================================
- * 10. MAIN EXECUTION LOOP & TOGGLE HANDLER
+ * 10. SINGLE-BUTTON STATE MACHINE HANDLER
  * ========================================================================= */
-void handle_button_toggles(void)
+void handle_single_button(void)
 {
-    // --- CALIBRATION TOGGLE ---
-    if (btn_calib_pressed) {
-        vTaskDelay(pdMS_TO_TICKS(50)); // Debounce
-        if (gpio_get_level(BTN_CALIB_GPIO) == 0) {
+    if (btn_pressed) {
+        btn_pressed = false;
+
+        // Verify button is actually pulled LOW
+        if (gpio_get_level(BTN_SINGLE_GPIO) == 0) {
+
+            // Cycle State Machine
             if (robot_state == ROBOT_STATE_IDLE) {
+                // IDLE -> CALIBRATING
                 robot_state = ROBOT_STATE_CALIBRATING;
-                gpio_set_level(STBY, 0); // Disable motors during calibration
+                gpio_set_level(STBY, 0); // Disable motors
 
                 for (int i = 0; i < NUM_SENSORS; i++) {
                     sensor_min[i] = 4095;
                     sensor_max[i] = 0;
                 }
-                ESP_LOGW(TAG, ">>> CALIBRATION STARTED <<<");
-            } 
+                ESP_LOGW(TAG, ">>> STATE: CALIBRATING (Sweep sensors across line) <<<");
+            }
             else if (robot_state == ROBOT_STATE_CALIBRATING) {
+                // CALIBRATING -> IDLE (Data saved)
                 robot_state = ROBOT_STATE_IDLE;
                 is_calibrated = true;
-                ESP_LOGW(TAG, ">>> CALIBRATION DONE & SAVED <<<");
+                ESP_LOGW(TAG, ">>> STATE: IDLE (Calibration Saved! Press again to RUN) <<<");
             }
-        }
-        btn_calib_pressed = false;
-    }
-
-    // --- RUN TOGGLE ---
-    if (btn_run_pressed) {
-        vTaskDelay(pdMS_TO_TICKS(50)); // Debounce
-        if (gpio_get_level(BTN_RUN_GPIO) == 0) {
-            if (robot_state == ROBOT_STATE_IDLE) {
-                robot_state = ROBOT_STATE_RUNNING;
-                pid_reset(&line_pid);
-                gpio_set_level(STBY, 1); // Enable motor driver
-                ESP_LOGW(TAG, ">>> RUNNING STARTED <<<");
-            } 
             else if (robot_state == ROBOT_STATE_RUNNING) {
+                // RUNNING -> IDLE (Stop robot)
                 robot_state = ROBOT_STATE_IDLE;
                 gpio_set_level(STBY, 0); // Disable motor driver
-                ESP_LOGW(TAG, ">>> RUNNING STOPPED <<<");
+                ESP_LOGW(TAG, ">>> STATE: IDLE (Robot Stopped) <<<");
+            }
+            else {
+                // Safety Fallback
+                robot_state = ROBOT_STATE_IDLE;
+                gpio_set_level(STBY, 0);
             }
         }
-        btn_run_pressed = false;
+    }
+}
+
+// Special check for starting the run state from IDLE
+void handle_run_trigger_from_idle(void)
+{
+    // If we are in IDLE, and calibrated, and button is pressed again -> RUN
+    if (btn_pressed && robot_state == ROBOT_STATE_IDLE && is_calibrated) {
+        btn_pressed = false;
+        if (gpio_get_level(BTN_SINGLE_GPIO) == 0) {
+            robot_state = ROBOT_STATE_RUNNING;
+            pid_reset(&line_pid);
+            gpio_set_level(STBY, 1); // Enable motors
+            ESP_LOGW(TAG, ">>> STATE: RUNNING STARTED <<<");
+        }
     }
 }
 
 void app_main(void)
 {
-    // Initialize Hardware
     sensors_init();
     buttons_init();
     leds_init();
@@ -464,14 +474,17 @@ void app_main(void)
     int calibrated[NUM_SENSORS];
     uint32_t log_counter = 0;
 
-    ESP_LOGI(TAG, "System Ready. Press BTN1 (GPIO 4) to Calibrate, BTN2 (GPIO 5) to Run.");
+    ESP_LOGI(TAG, "System Ready! Press BTN (GPIO 4) to Start Calibration.");
 
     while (1) {
-        // Handle User Input & State Transitions
-        handle_button_toggles();
-        update_leds();
+        // Handle Button Input
+        if (robot_state == ROBOT_STATE_IDLE && is_calibrated) {
+            handle_run_trigger_from_idle();
+        } else {
+            handle_single_button();
+        }
 
-        // Always read sensors
+        update_leds();
         read_sensors(raw);
 
         // --- STATE 1: CALIBRATING ---
@@ -496,18 +509,27 @@ void app_main(void)
 
             drive(left_speed, right_speed);
 
-            // Log output every 100ms (5 loops) to prevent buffer overflows
+            // Log output every 100ms
             if (++log_counter >= 5) {
-                ESP_LOGI(TAG, "pos: %6.2f | corr: %6.2f | L:%4d R:%4d | bin: 0x%02X | cnt: %d",
-                         position, correction, clamp_duty(left_speed), clamp_duty(right_speed), bin, cnt);
+                ESP_LOGI(TAG, "pos: %6.2f | corr: %6.2f | L:%4d R:%4d | bin: %c%c%c%c%c%c%c%c | cnt: %d",
+                         position, correction, clamp_duty(left_speed), clamp_duty(right_speed),
+                         (bin & (1 << 7)) ? '1' : '0',
+                         (bin & (1 << 6)) ? '1' : '0',
+                         (bin & (1 << 5)) ? '1' : '0',
+                         (bin & (1 << 4)) ? '1' : '0',
+                         (bin & (1 << 3)) ? '1' : '0',
+                         (bin & (1 << 2)) ? '1' : '0',
+                         (bin & (1 << 1)) ? '1' : '0',
+                         (bin & (1 << 0)) ? '1' : '0',
+                         cnt);
                 log_counter = 0;
             }
         } 
         // --- STATE 3: IDLE ---
         else {
-            gpio_set_level(STBY, 0); // Motors off in idle
+            gpio_set_level(STBY, 0); // Motors off
         }
 
-        vTaskDelay(pdMS_TO_TICKS(20)); // Fixed 20ms timestep (50 Hz)
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
