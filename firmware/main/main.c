@@ -6,7 +6,7 @@
  * - Software Debounced Hardware Interrupts via Microsecond Timer
  * - Status LEDs (GPIO 2: Calibration Status, GPIO 0: Run Status)
  * - Closed-Loop PID Control (Filtered Derivative + Anti-Windup)
- * - 8-Bit Visual Binary Pattern Sensor Logging (e.g. 01110000)
+ * - Blind Straight-Drive Left Junction Verifier
  */
 
 #include <stdio.h>
@@ -29,7 +29,7 @@ static const char *TAG = "LINE_FOLLOWER";
 
 // Single Control Button (GPIO 4)
 #define BTN_SINGLE_GPIO    GPIO_NUM_4
-#define DEBOUNCE_TIME_MS   300 // Minimum time between valid button presses
+#define DEBOUNCE_TIME_MS   300
 
 // Status LEDs
 #define LED_CALIB_GPIO     GPIO_NUM_2
@@ -83,16 +83,51 @@ static volatile bool btn_pressed = false;
 // PWM Parameters for Speed Control
 #define LEDC_MODE       LEDC_LOW_SPEED_MODE
 #define LEDC_TIMER      LEDC_TIMER_0
-#define LEDC_DUTY_RES   LEDC_TIMER_10_BIT  // Resolution: 0 to 1023
-#define LEDC_FREQUENCY  5000               // Frequency: 5000 Hz
+#define LEDC_DUTY_RES   LEDC_TIMER_10_BIT
+#define LEDC_FREQUENCY  5000
 #define CHANNEL_A       LEDC_CHANNEL_0
 #define CHANNEL_B       LEDC_CHANNEL_1
 
-#define MAX_DUTY        1023               // Max motor speed limit
-#define BASE_SPEED      1000               // Default forward speed
+#define MAX_DUTY        1023
+#define BASE_SPEED      1000
 
 /* =========================================================================
- * 4. PID CONTROLLER STRUCT & STATE
+ * 4. LEFT JUNCTION VERIFIER CONFIGURATION
+ * ========================================================================= */
+#define LEFT_JUNCTION_SPEED       400
+#define LEFT_JUNCTION_SAMPLE_MS   20
+#define LEFT_JUNCTION_SAMPLES     10
+#define LEFT_COOLDOWN_MS          1000
+
+static bool left_junction_sampling = false;
+static int left_junction_sample_count = 0;
+static int left_junction_valid_hits = 0;
+static int64_t left_junction_last_sample_us = 0;
+static int64_t last_left_junction_time_us = 0;
+
+/*
+ * Returns true if current binary pattern matches known Left Junction triggers.
+ * Sensor Order: Bit 7 (S7) ... Bit 0 (S0)
+ */
+bool is_left_junction_pattern(uint8_t binary)
+{
+    switch (binary)
+    {
+        case 0b11111100: // S7, S6, S5, S4, S3, S2
+        case 0b11111000: // Wide Left + Far Left
+        case 0b11110000: // S7, S6, S5, S4
+        case 0b11111110: // Wide Left
+        case 0b11111001: // Almost full line towards left
+        case 0b01011000:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+/* =========================================================================
+ * 5. PID CONTROLLER STRUCT & STATE
  * ========================================================================= */
 #define DERIVATIVE_FILTER_ALPHA 0.2f
 
@@ -119,7 +154,7 @@ static pid_t line_pid = {
 };
 
 /* =========================================================================
- * 5. INTERRUPT SERVICE ROUTINES & DEBOUNCED SINGLE BUTTON
+ * 6. INTERRUPT SERVICE ROUTINES & DEBOUNCED SINGLE BUTTON
  * ========================================================================= */
 static volatile uint64_t last_btn_time_ms = 0;
 
@@ -127,7 +162,6 @@ static void IRAM_ATTR button_isr_handler(void* arg)
 {
     uint64_t now_ms = esp_timer_get_time() / 1000;
 
-    // Hard hardware lock-out directly inside ISR context
     if ((now_ms - last_btn_time_ms) > DEBOUNCE_TIME_MS) {
         btn_pressed = true;
         last_btn_time_ms = now_ms;
@@ -150,7 +184,7 @@ void buttons_init(void)
 }
 
 /* =========================================================================
- * 6. LED STATUS INDICATORS
+ * 7. LED STATUS INDICATORS
  * ========================================================================= */
 void leds_init(void)
 {
@@ -192,7 +226,7 @@ void update_leds(void)
 }
 
 /* =========================================================================
- * 7. SENSOR & JUNCTION FUNCTIONS
+ * 8. SENSOR PROCESSING FUNCTIONS
  * ========================================================================= */
 void sensors_init(void)
 {
@@ -280,18 +314,8 @@ uint8_t get_sensors_binary(const int *calibrated)
     return binary;
 }
 
-uint8_t count_binary(uint8_t binary)
-{
-    uint8_t count = 0;
-    while (binary) {
-        count += binary & 1;
-        binary >>= 1;
-    }
-    return count;
-}
-
 /* =========================================================================
- * 8. PID COMPUTATION FUNCTION
+ * 9. PID COMPUTATION FUNCTION
  * ========================================================================= */
 void pid_reset(pid_t *pid)
 {
@@ -321,7 +345,7 @@ float pid_compute(pid_t *pid, float error, float dt)
 }
 
 /* =========================================================================
- * 9. MOTOR DRIVER CONTROL FUNCTIONS
+ * 10. MOTOR DRIVER CONTROL FUNCTIONS
  * ========================================================================= */
 void motor_gpio_init(void)
 {
@@ -404,21 +428,18 @@ void drive(int left_speed, int right_speed)
 }
 
 /* =========================================================================
- * 10. SINGLE-BUTTON STATE MACHINE HANDLER
+ * 11. SINGLE-BUTTON STATE MACHINE HANDLER
  * ========================================================================= */
 void handle_single_button(void)
 {
     if (btn_pressed) {
         btn_pressed = false;
 
-        // Verify button is actually pulled LOW
         if (gpio_get_level(BTN_SINGLE_GPIO) == 0) {
 
-            // Cycle State Machine
             if (robot_state == ROBOT_STATE_IDLE) {
-                // IDLE -> CALIBRATING
                 robot_state = ROBOT_STATE_CALIBRATING;
-                gpio_set_level(STBY, 0); // Disable motors
+                gpio_set_level(STBY, 0);
 
                 for (int i = 0; i < NUM_SENSORS; i++) {
                     sensor_min[i] = 4095;
@@ -427,19 +448,17 @@ void handle_single_button(void)
                 ESP_LOGW(TAG, ">>> STATE: CALIBRATING (Sweep sensors across line) <<<");
             }
             else if (robot_state == ROBOT_STATE_CALIBRATING) {
-                // CALIBRATING -> IDLE (Data saved)
                 robot_state = ROBOT_STATE_IDLE;
                 is_calibrated = true;
                 ESP_LOGW(TAG, ">>> STATE: IDLE (Calibration Saved! Press again to RUN) <<<");
             }
             else if (robot_state == ROBOT_STATE_RUNNING) {
-                // RUNNING -> IDLE (Stop robot)
                 robot_state = ROBOT_STATE_IDLE;
-                gpio_set_level(STBY, 0); // Disable motor driver
+                left_junction_sampling = false;
+                gpio_set_level(STBY, 0);
                 ESP_LOGW(TAG, ">>> STATE: IDLE (Robot Stopped) <<<");
             }
             else {
-                // Safety Fallback
                 robot_state = ROBOT_STATE_IDLE;
                 gpio_set_level(STBY, 0);
             }
@@ -447,16 +466,15 @@ void handle_single_button(void)
     }
 }
 
-// Special check for starting the run state from IDLE
 void handle_run_trigger_from_idle(void)
 {
-    // If we are in IDLE, and calibrated, and button is pressed again -> RUN
     if (btn_pressed && robot_state == ROBOT_STATE_IDLE && is_calibrated) {
         btn_pressed = false;
         if (gpio_get_level(BTN_SINGLE_GPIO) == 0) {
             robot_state = ROBOT_STATE_RUNNING;
+            left_junction_sampling = false;
             pid_reset(&line_pid);
-            gpio_set_level(STBY, 1); // Enable motors
+            gpio_set_level(STBY, 1);
             ESP_LOGW(TAG, ">>> STATE: RUNNING STARTED <<<");
         }
     }
@@ -477,7 +495,6 @@ void app_main(void)
     ESP_LOGI(TAG, "System Ready! Press BTN (GPIO 4) to Start Calibration.");
 
     while (1) {
-        // Handle Button Input
         if (robot_state == ROBOT_STATE_IDLE && is_calibrated) {
             handle_run_trigger_from_idle();
         } else {
@@ -498,36 +515,108 @@ void app_main(void)
         if (robot_state == ROBOT_STATE_RUNNING) {
             get_calibrated_values(raw, calibrated);
             float position = get_weighted_position(calibrated);
+            uint8_t binary = get_sensors_binary(calibrated);
 
-            uint8_t bin = get_sensors_binary(calibrated);
-            uint8_t cnt = count_binary(bin);
+            int binary_count = 0;
+            for (int i = 0; i < NUM_SENSORS; i++) {
+                if (binary & (1 << i)) binary_count++;
+            }
 
-            float correction = pid_compute(&line_pid, position, 0.02f);
+            int64_t now_us = esp_timer_get_time();
 
-            int left_speed  = BASE_SPEED - (int)correction;
-            int right_speed = BASE_SPEED + (int)correction;
+            /* -------------------------------------------------
+             * TRIGGER CHECK FOR LEFT JUNCTION
+             * ------------------------------------------------- */
+            if (!left_junction_sampling &&
+                ((now_us - last_left_junction_time_us) > ((int64_t)LEFT_COOLDOWN_MS * 1000))) {
 
-            drive(left_speed, right_speed);
+                if (is_left_junction_pattern(binary)) {
+                    left_junction_sampling = true;
+                    left_junction_sample_count = 0;
+                    left_junction_valid_hits = 0;
+                    left_junction_last_sample_us = now_us;
+                    last_left_junction_time_us = now_us;
 
-            // Log output every 100ms
-            if (++log_counter >= 5) {
-                ESP_LOGI(TAG, "pos: %6.2f | corr: %6.2f | L:%4d R:%4d | bin: %c%c%c%c%c%c%c%c | cnt: %d",
-                         position, correction, clamp_duty(left_speed), clamp_duty(right_speed),
-                         (bin & (1 << 7)) ? '1' : '0',
-                         (bin & (1 << 6)) ? '1' : '0',
-                         (bin & (1 << 5)) ? '1' : '0',
-                         (bin & (1 << 4)) ? '1' : '0',
-                         (bin & (1 << 3)) ? '1' : '0',
-                         (bin & (1 << 2)) ? '1' : '0',
-                         (bin & (1 << 1)) ? '1' : '0',
-                         (bin & (1 << 0)) ? '1' : '0',
-                         cnt);
-                log_counter = 0;
+                    ESP_LOGW(TAG, ">>> LEFT JUNCTION CANDIDATE DETECTED <<<");
+                }
+            }
+
+            /* -------------------------------------------------
+             * MODE A: LEFT JUNCTION SAMPLING (PID OFF -> DRIVE STRAIGHT)
+             * ------------------------------------------------- */
+            if (left_junction_sampling) {
+
+                drive(LEFT_JUNCTION_SPEED, LEFT_JUNCTION_SPEED);
+
+                if ((now_us - left_junction_last_sample_us) >= ((int64_t)LEFT_JUNCTION_SAMPLE_MS * 1000)) {
+                    left_junction_last_sample_us = now_us;
+                    left_junction_sample_count++;
+
+                    // Check high bits (0xE0 = S7, S6, S5) for left junction detection
+                    if ((binary & 0xE0) != 0 && binary_count >= 4) {
+                        left_junction_valid_hits++;
+                    }
+
+                    ESP_LOGI(TAG,
+                             "LEFT SAMPLE %2d/%d | bin=%c%c%c%c%c%c%c%c | cnt=%d | pos=%.2f",
+                             left_junction_sample_count,
+                             LEFT_JUNCTION_SAMPLES,
+                             (binary & (1 << 7)) ? '1' : '0',
+                             (binary & (1 << 6)) ? '1' : '0',
+                             (binary & (1 << 5)) ? '1' : '0',
+                             (binary & (1 << 4)) ? '1' : '0',
+                             (binary & (1 << 3)) ? '1' : '0',
+                             (binary & (1 << 2)) ? '1' : '0',
+                             (binary & (1 << 1)) ? '1' : '0',
+                             (binary & (1 << 0)) ? '1' : '0',
+                             binary_count,
+                             position);
+
+                    if (left_junction_sample_count >= LEFT_JUNCTION_SAMPLES) {
+
+                        if (left_junction_valid_hits >= 6) {
+                            ESP_LOGW(TAG, ">>> LEFT JUNCTION CONFIRMED (Hits: %d/%d) <<<",
+                                     left_junction_valid_hits, LEFT_JUNCTION_SAMPLES);
+                        } else {
+                            ESP_LOGE(TAG, ">>> FALSE DETECTION REJECTED (Hits: %d/%d) <<<",
+                                     left_junction_valid_hits, LEFT_JUNCTION_SAMPLES);
+                        }
+
+                        left_junction_sampling = false;
+                        pid_reset(&line_pid);
+                        ESP_LOGI(TAG, ">>> PID ON - REJOINING LINE <<<");
+                    }
+                }
+            }
+            /* -------------------------------------------------
+             * MODE B: NORMAL CLOSED-LOOP PID LINE FOLLOWING
+             * ------------------------------------------------- */
+            else {
+                float correction = pid_compute(&line_pid, position, 0.02f);
+
+                int left_speed  = BASE_SPEED - (int)correction;
+                int right_speed = BASE_SPEED + (int)correction;
+
+                drive(left_speed, right_speed);
+
+                if (++log_counter >= 5) {
+                    ESP_LOGI(TAG, "pos: %6.2f | corr: %6.2f | L:%4d R:%4d | bin: %c%c%c%c%c%c%c%c | cnt: %d",
+                             position, correction, clamp_duty(left_speed), clamp_duty(right_speed),
+                             (binary & (1 << 7)) ? '1' : '0',
+                             (binary & (1 << 6)) ? '1' : '0',
+                             (binary & (1 << 5)) ? '1' : '0',
+                             (binary & (1 << 4)) ? '1' : '0',
+                             (binary & (1 << 3)) ? '1' : '0',
+                             (binary & (1 << 2)) ? '1' : '0',
+                             (binary & (1 << 1)) ? '1' : '0',
+                             (binary & (1 << 0)) ? '1' : '0',
+                             binary_count);
+                    log_counter = 0;
+                }
             }
         } 
-        // --- STATE 3: IDLE ---
         else {
-            gpio_set_level(STBY, 0); // Motors off
+            gpio_set_level(STBY, 0);
         }
 
         vTaskDelay(pdMS_TO_TICKS(20));
