@@ -4,7 +4,10 @@
  * - 8 Sensor Line Position Detection
  * - Single-Button Control State Machine (GPIO 4)
  * - Closed-Loop PID Control
- * - Unconditional Straight Probe Window with Flexible Straight-Line Classifier
+ * - Unconditional Straight Probe Window (PID OFF)
+ * - Symmetric Junction Classifier:
+ *     - T-LEFT  / L-LEFT
+ *     - T-RIGHT / L-RIGHT
  */
 
 #include <stdio.h>
@@ -91,17 +94,25 @@ static volatile bool btn_pressed = false;
  * 4. JUNCTION PROBE & CLASSIFICATION CONFIGURATION
  * ========================================================================= */
 #define JUNCTION_STRAIGHT_SPEED      500    // PWM speed during probe
-#define JUNCTION_STRAIGHT_DRIVE_MS   500    // Time (ms) to drive straight past junction stem
+#define JUNCTION_STRAIGHT_DRIVE_MS   250    // Time (ms) to drive straight past junction stem
 #define JUNCTION_COOLDOWN_MS         1000   // Cooldown between triggers
 
 #define CENTER_REGION_MASK           0x3C   // Middle 4 sensors: S5, S4, S3, S2 (0b00111100)
 
+typedef enum {
+    JUNCTION_DIR_NONE = 0,
+    JUNCTION_DIR_LEFT,
+    JUNCTION_DIR_RIGHT
+} junction_direction_t;
+
 static bool junction_probing_active = false;
+static junction_direction_t detected_direction = JUNCTION_DIR_NONE;
 static int64_t junction_probe_start_us = 0;
 static int64_t last_junction_time_us = 0;
 
 /*
  * Returns true if current binary pattern matches known Left Junction triggers.
+ * Sensor Order: Bit 7 (S7) ... Bit 0 (S0)
  */
 bool is_left_junction_pattern(uint8_t binary)
 {
@@ -113,6 +124,27 @@ bool is_left_junction_pattern(uint8_t binary)
         case 0b11111110:
         case 0b11111001:
         case 0b01011000:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+/*
+ * Returns true if current binary pattern matches known Right Junction triggers.
+ * Inverted counterpart of left junction pattern (active S0, S1, S2, S3 bits).
+ */
+bool is_right_junction_pattern(uint8_t binary)
+{
+    switch (binary)
+    {
+        case 0b00111111: // S5, S4, S3, S2, S1, S0
+        case 0b00011111: // S4, S3, S2, S1, S0
+        case 0b00001111: // S3, S2, S1, S0
+        case 0b01111111: // S6, S5, S4, S3, S2, S1, S0
+        case 0b10011111: // S7, S4, S3, S2, S1, S0
+        case 0b00011010: // Right-side branch
             return true;
 
         default:
@@ -478,6 +510,7 @@ void handle_single_button(void)
             else if (robot_state == ROBOT_STATE_RUNNING) {
                 robot_state = ROBOT_STATE_IDLE;
                 junction_probing_active = false;
+                detected_direction = JUNCTION_DIR_NONE;
                 gpio_set_level(STBY, 0);
                 ESP_LOGW(TAG, ">>> STATE: IDLE (Robot Stopped) <<<");
             }
@@ -496,6 +529,7 @@ void handle_run_trigger_from_idle(void)
         if (gpio_get_level(BTN_SINGLE_GPIO) == 0) {
             robot_state = ROBOT_STATE_RUNNING;
             junction_probing_active = false;
+            detected_direction = JUNCTION_DIR_NONE;
             pid_reset(&line_pid);
             gpio_set_level(STBY, 1);
             ESP_LOGW(TAG, ">>> STATE: RUNNING STARTED <<<");
@@ -548,17 +582,26 @@ void app_main(void)
             int64_t now_us = esp_timer_get_time();
 
             /* -------------------------------------------------
-             * TRIGGER CHECK FOR JUNCTION
+             * TRIGGER CHECK FOR LEFT OR RIGHT JUNCTION
              * ------------------------------------------------- */
             if (!junction_probing_active &&
                 ((now_us - last_junction_time_us) > ((int64_t)JUNCTION_COOLDOWN_MS * 1000))) {
 
                 if (is_left_junction_pattern(binary)) {
                     junction_probing_active = true;
+                    detected_direction      = JUNCTION_DIR_LEFT;
                     junction_probe_start_us = now_us;
                     last_junction_time_us   = now_us;
 
-                    ESP_LOGW(TAG, ">>> JUNCTION CANDIDATE DETECTED -> STARTING STRAIGHT PROBE <<<");
+                    ESP_LOGW(TAG, ">>> LEFT JUNCTION CANDIDATE DETECTED -> STARTING STRAIGHT PROBE <<<");
+                }
+                else if (is_right_junction_pattern(binary)) {
+                    junction_probing_active = true;
+                    detected_direction      = JUNCTION_DIR_RIGHT;
+                    junction_probe_start_us = now_us;
+                    last_junction_time_us   = now_us;
+
+                    ESP_LOGW(TAG, ">>> RIGHT JUNCTION CANDIDATE DETECTED -> STARTING STRAIGHT PROBE <<<");
                 }
             }
 
@@ -572,7 +615,8 @@ void app_main(void)
 
                 int64_t elapsed_ms = (now_us - junction_probe_start_us) / 1000;
 
-                ESP_LOGI(TAG, "PROBE t=%lld ms | bin=%c%c%c%c%c%c%c%c | cnt=%d",
+                ESP_LOGI(TAG, "PROBE [%s] t=%lld ms | bin=%c%c%c%c%c%c%c%c | cnt=%d",
+                         (detected_direction == JUNCTION_DIR_LEFT) ? "LEFT" : "RIGHT",
                          elapsed_ms,
                          (binary & (1 << 7)) ? '1' : '0',
                          (binary & (1 << 6)) ? '1' : '0',
@@ -587,17 +631,26 @@ void app_main(void)
                 // Check if straight probe duration has completed
                 if (elapsed_ms >= JUNCTION_STRAIGHT_DRIVE_MS) {
 
-                    // Evaluate straight line using pattern matching + count + center mask
                     bool straight_line_present = check_straight_line_exists(binary, binary_count);
 
-                    if (straight_line_present) {
-                        ESP_LOGW(TAG, ">>> CLASSIFICATION: T-JUNCTION / CROSS (Straight Line Exists) <<<");
-                    } else {
-                        ESP_LOGW(TAG, ">>> CLASSIFICATION: L-JUNCTION (Dead End Straight -> Mandatory Left Turn) <<<");
+                    if (detected_direction == JUNCTION_DIR_LEFT) {
+                        if (straight_line_present) {
+                            ESP_LOGW(TAG, ">>> CLASSIFICATION: T-JUNCTION (Left Branch + Straight Line) <<<");
+                        } else {
+                            ESP_LOGW(TAG, ">>> CLASSIFICATION: L-JUNCTION (Dead End Straight -> Mandatory Left Turn) <<<");
+                        }
+                    }
+                    else if (detected_direction == JUNCTION_DIR_RIGHT) {
+                        if (straight_line_present) {
+                            ESP_LOGW(TAG, ">>> CLASSIFICATION: T-JUNCTION (Right Branch + Straight Line) <<<");
+                        } else {
+                            ESP_LOGW(TAG, ">>> CLASSIFICATION: L-JUNCTION (Dead End Straight -> Mandatory Right Turn) <<<");
+                        }
                     }
 
                     // Reset probe state and re-enable PID line following
                     junction_probing_active = false;
+                    detected_direction      = JUNCTION_DIR_NONE;
                     pid_reset(&line_pid);
                     ESP_LOGI(TAG, ">>> PID ON - REJOINING LINE <<<");
                 }
