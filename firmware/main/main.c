@@ -2,11 +2,9 @@
  * ESP32 Line Follower Robot
  * Features:
  * - 8 Sensor Line Position Detection
- * - Single-Button Control State Machine (GPIO 4: Cycles IDLE -> CALIB -> IDLE -> RUN -> IDLE)
- * - Software Debounced Hardware Interrupts via Microsecond Timer
- * - Status LEDs (GPIO 2: Calibration Status, GPIO 0: Run Status)
- * - Closed-Loop PID Control (Filtered Derivative + Anti-Windup)
- * - Blind Straight-Drive Left Junction Verifier
+ * - Single-Button Control State Machine (GPIO 4)
+ * - Closed-Loop PID Control
+ * - Unconditional Straight Probe Window with Flexible Straight-Line Classifier
  */
 
 #include <stdio.h>
@@ -49,7 +47,6 @@ static const float sensor_weight[NUM_SENSORS] = {
     -52.5f, -37.5f, -22.5f, -7.5f, 7.5f, 22.5f, 37.5f, 52.5f
 };
 
-// System Handles & Calibration Bounds
 static adc_oneshot_unit_handle_t adc1_handle;
 static adc_oneshot_unit_handle_t adc2_handle;
 
@@ -80,7 +77,6 @@ static volatile bool btn_pressed = false;
 #define PWMA_PIN  GPIO_NUM_16
 #define PWMB_PIN  GPIO_NUM_19
 
-// PWM Parameters for Speed Control
 #define LEDC_MODE       LEDC_LOW_SPEED_MODE
 #define LEDC_TIMER      LEDC_TIMER_0
 #define LEDC_DUTY_RES   LEDC_TIMER_10_BIT
@@ -92,38 +88,65 @@ static volatile bool btn_pressed = false;
 #define BASE_SPEED      1000
 
 /* =========================================================================
- * 4. LEFT JUNCTION VERIFIER CONFIGURATION
+ * 4. JUNCTION PROBE & CLASSIFICATION CONFIGURATION
  * ========================================================================= */
-#define LEFT_JUNCTION_SPEED       400
-#define LEFT_JUNCTION_SAMPLE_MS   20
-#define LEFT_JUNCTION_SAMPLES     10
-#define LEFT_COOLDOWN_MS          1000
+#define JUNCTION_STRAIGHT_SPEED      500    // PWM speed during probe
+#define JUNCTION_STRAIGHT_DRIVE_MS   500    // Time (ms) to drive straight past junction stem
+#define JUNCTION_COOLDOWN_MS         1000   // Cooldown between triggers
 
-static bool left_junction_sampling = false;
-static int left_junction_sample_count = 0;
-static int left_junction_valid_hits = 0;
-static int64_t left_junction_last_sample_us = 0;
-static int64_t last_left_junction_time_us = 0;
+#define CENTER_REGION_MASK           0x3C   // Middle 4 sensors: S5, S4, S3, S2 (0b00111100)
+
+static bool junction_probing_active = false;
+static int64_t junction_probe_start_us = 0;
+static int64_t last_junction_time_us = 0;
 
 /*
  * Returns true if current binary pattern matches known Left Junction triggers.
- * Sensor Order: Bit 7 (S7) ... Bit 0 (S0)
  */
 bool is_left_junction_pattern(uint8_t binary)
 {
     switch (binary)
     {
-        case 0b11111100: // S7, S6, S5, S4, S3, S2
-        case 0b11111000: // Wide Left + Far Left
-        case 0b11110000: // S7, S6, S5, S4
-        case 0b11111110: // Wide Left
-        case 0b11111001: // Almost full line towards left
+        case 0b11111100:
+        case 0b11111000:
+        case 0b11110000:
+        case 0b11111110:
+        case 0b11111001:
         case 0b01011000:
             return true;
 
         default:
             return false;
     }
+}
+
+/*
+ * Multi-case + Count/Mask hybrid check for Straight Line Presence
+ */
+bool check_straight_line_exists(uint8_t binary, int count)
+{
+    // Specific pattern matches for standard/shifting straight lines
+    switch (binary)
+    {
+        case 0b00011000: // Ideal center (S3, S4)
+        case 0b00010000: // S4 single
+        case 0b00001000: // S3 single
+        case 0b00111000: // S3, S4, S5 (3-sensor wide)
+        case 0b00011100: // S2, S3, S4 (3-sensor wide)
+        case 0b00110000: // S4, S5
+        case 0b00001100: // S2, S3
+            return true;
+
+        default:
+            break;
+    }
+
+    // Fallback: Check if ANY of the middle 4 sensors are active with a valid line count
+    if ((binary & CENTER_REGION_MASK) != 0 && count >= 1) {
+        return true;
+    }
+
+    return false;
 }
 
 /* =========================================================================
@@ -454,7 +477,7 @@ void handle_single_button(void)
             }
             else if (robot_state == ROBOT_STATE_RUNNING) {
                 robot_state = ROBOT_STATE_IDLE;
-                left_junction_sampling = false;
+                junction_probing_active = false;
                 gpio_set_level(STBY, 0);
                 ESP_LOGW(TAG, ">>> STATE: IDLE (Robot Stopped) <<<");
             }
@@ -472,7 +495,7 @@ void handle_run_trigger_from_idle(void)
         btn_pressed = false;
         if (gpio_get_level(BTN_SINGLE_GPIO) == 0) {
             robot_state = ROBOT_STATE_RUNNING;
-            left_junction_sampling = false;
+            junction_probing_active = false;
             pid_reset(&line_pid);
             gpio_set_level(STBY, 1);
             ESP_LOGW(TAG, ">>> STATE: RUNNING STARTED <<<");
@@ -525,67 +548,58 @@ void app_main(void)
             int64_t now_us = esp_timer_get_time();
 
             /* -------------------------------------------------
-             * TRIGGER CHECK FOR LEFT JUNCTION
+             * TRIGGER CHECK FOR JUNCTION
              * ------------------------------------------------- */
-            if (!left_junction_sampling &&
-                ((now_us - last_left_junction_time_us) > ((int64_t)LEFT_COOLDOWN_MS * 1000))) {
+            if (!junction_probing_active &&
+                ((now_us - last_junction_time_us) > ((int64_t)JUNCTION_COOLDOWN_MS * 1000))) {
 
                 if (is_left_junction_pattern(binary)) {
-                    left_junction_sampling = true;
-                    left_junction_sample_count = 0;
-                    left_junction_valid_hits = 0;
-                    left_junction_last_sample_us = now_us;
-                    last_left_junction_time_us = now_us;
+                    junction_probing_active = true;
+                    junction_probe_start_us = now_us;
+                    last_junction_time_us   = now_us;
 
-                    ESP_LOGW(TAG, ">>> LEFT JUNCTION CANDIDATE DETECTED <<<");
+                    ESP_LOGW(TAG, ">>> JUNCTION CANDIDATE DETECTED -> STARTING STRAIGHT PROBE <<<");
                 }
             }
 
             /* -------------------------------------------------
-             * MODE A: LEFT JUNCTION SAMPLING (PID OFF -> DRIVE STRAIGHT)
+             * MODE A: UNCONDITIONAL STRAIGHT DRIVE PROBE (PID OFF)
              * ------------------------------------------------- */
-            if (left_junction_sampling) {
+            if (junction_probing_active) {
 
-                drive(LEFT_JUNCTION_SPEED, LEFT_JUNCTION_SPEED);
+                // Drive strictly straight past the junction stem
+                drive(JUNCTION_STRAIGHT_SPEED, JUNCTION_STRAIGHT_SPEED);
 
-                if ((now_us - left_junction_last_sample_us) >= ((int64_t)LEFT_JUNCTION_SAMPLE_MS * 1000)) {
-                    left_junction_last_sample_us = now_us;
-                    left_junction_sample_count++;
+                int64_t elapsed_ms = (now_us - junction_probe_start_us) / 1000;
 
-                    // Check high bits (0xE0 = S7, S6, S5) for left junction detection
-                    if ((binary & 0xE0) != 0 && binary_count >= 4) {
-                        left_junction_valid_hits++;
+                ESP_LOGI(TAG, "PROBE t=%lld ms | bin=%c%c%c%c%c%c%c%c | cnt=%d",
+                         elapsed_ms,
+                         (binary & (1 << 7)) ? '1' : '0',
+                         (binary & (1 << 6)) ? '1' : '0',
+                         (binary & (1 << 5)) ? '1' : '0',
+                         (binary & (1 << 4)) ? '1' : '0',
+                         (binary & (1 << 3)) ? '1' : '0',
+                         (binary & (1 << 2)) ? '1' : '0',
+                         (binary & (1 << 1)) ? '1' : '0',
+                         (binary & (1 << 0)) ? '1' : '0',
+                         binary_count);
+
+                // Check if straight probe duration has completed
+                if (elapsed_ms >= JUNCTION_STRAIGHT_DRIVE_MS) {
+
+                    // Evaluate straight line using pattern matching + count + center mask
+                    bool straight_line_present = check_straight_line_exists(binary, binary_count);
+
+                    if (straight_line_present) {
+                        ESP_LOGW(TAG, ">>> CLASSIFICATION: T-JUNCTION / CROSS (Straight Line Exists) <<<");
+                    } else {
+                        ESP_LOGW(TAG, ">>> CLASSIFICATION: L-JUNCTION (Dead End Straight -> Mandatory Left Turn) <<<");
                     }
 
-                    ESP_LOGI(TAG,
-                             "LEFT SAMPLE %2d/%d | bin=%c%c%c%c%c%c%c%c | cnt=%d | pos=%.2f",
-                             left_junction_sample_count,
-                             LEFT_JUNCTION_SAMPLES,
-                             (binary & (1 << 7)) ? '1' : '0',
-                             (binary & (1 << 6)) ? '1' : '0',
-                             (binary & (1 << 5)) ? '1' : '0',
-                             (binary & (1 << 4)) ? '1' : '0',
-                             (binary & (1 << 3)) ? '1' : '0',
-                             (binary & (1 << 2)) ? '1' : '0',
-                             (binary & (1 << 1)) ? '1' : '0',
-                             (binary & (1 << 0)) ? '1' : '0',
-                             binary_count,
-                             position);
-
-                    if (left_junction_sample_count >= LEFT_JUNCTION_SAMPLES) {
-
-                        if (left_junction_valid_hits >= 6) {
-                            ESP_LOGW(TAG, ">>> LEFT JUNCTION CONFIRMED (Hits: %d/%d) <<<",
-                                     left_junction_valid_hits, LEFT_JUNCTION_SAMPLES);
-                        } else {
-                            ESP_LOGE(TAG, ">>> FALSE DETECTION REJECTED (Hits: %d/%d) <<<",
-                                     left_junction_valid_hits, LEFT_JUNCTION_SAMPLES);
-                        }
-
-                        left_junction_sampling = false;
-                        pid_reset(&line_pid);
-                        ESP_LOGI(TAG, ">>> PID ON - REJOINING LINE <<<");
-                    }
+                    // Reset probe state and re-enable PID line following
+                    junction_probing_active = false;
+                    pid_reset(&line_pid);
+                    ESP_LOGI(TAG, ">>> PID ON - REJOINING LINE <<<");
                 }
             }
             /* -------------------------------------------------
