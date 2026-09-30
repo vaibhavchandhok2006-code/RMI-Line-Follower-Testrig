@@ -216,7 +216,22 @@ Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM 
 - Need to properly read through the rest of the paper and examine a lightweight loop-handling exploration algorithm that handles closed loops without requiring hardware encoders.
 - Exploration phase remains aligned with the Sept 25–28 roadmap window.
 - Hardware status: Encoders remain dropped as a stretch goal; perfboard/power supply fabrication deferred as low-risk mechanical work to protect algorithm development time.
-- *Next Step:* Complete the pending hardware test for binary junction detection before writing the exploration logic.
 
+### Sep 22–30 — PID, Junction Handling & Final Hardware Integration
+
+- Integrated the calibrated RLS-08 readings with continuous weighted line-position estimation and implemented closed-loop PID line following on the physical track.
+- Tuned the controller experimentally on the actual track. After testing different speeds and gains, the stable baseline converged to:
+  - `BASE_SPEED = 1000 / 1023`
+  - `Kp = 55`, `Ki = 0`, `Kd = 1.5`
+  - Filtered derivative with `alpha = 0.2`
+- Developed binary sensor-pattern based junction detection using experimentally observed patterns from the track.
+- Added a multi-sample confirmation window to reduce false detections and distinguish an L-junction from a left-branch T-junction by checking for continued straight-line detection in later samples.
+- Implemented a dedicated junction-turning state. PID is temporarily disabled, the robot performs a fixed-duration differential spin, and then PID resumes. The left-turn duration was initially set to `350 ms`.
+- Corrected the physical turn direction in software after discovering that the final motor wiring orientation was opposite to the assumed polarity.
+- Designed and built a **standalone permanent perfboard**, soldering the complete electronics onto a single board instead of relying on the temporary breadboard setup. The ESP32, motor driver, power connections, sensor connections and supporting circuitry were integrated into the permanent assembly.
+- Added persistent sensor calibration using ESP32 NVS, allowing `sensor_min[]` and `sensor_max[]` to be saved to flash and automatically restored after power cycles. Recalibration overwrites the stored values.
+- Continued physical testing and debugging of the integrated robot, particularly around junction detection, turning behaviour and electrical connection stability.
+- By the end of this phase, the rig had a working calibrated PID line-following system with the first layer of junction detection and physical junction execution.
+- Exploration, path representation and route optimization remain the next major layer to be implemented.
 
 
