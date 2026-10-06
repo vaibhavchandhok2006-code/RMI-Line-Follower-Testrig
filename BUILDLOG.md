@@ -234,4 +234,22 @@ Successfully upgraded the dual DC motor driver firmware on ESP32 to support PWM 
 - By the end of this phase, the rig had a working calibrated PID line-following system with the first layer of junction detection and physical junction execution.
 - Exploration, path representation and route optimization remain the next major layer to be implemented.
 
+### Oct 1 - Oct 6 — Maze-Solving Algorithm Exploration
+
+- Explored the next stage of the project: maze exploration, node identification, branch tracking and shortest-path generation.
+- Initially considered a DFS + graph approach, but identified a key issue: without a reliable way to recognize a previously visited node, the robot cannot know whether a branch is actually unexplored.
+- Considered a simple path/LSRB-based approach:
+  - Simple and does not require mapping.
+  - Problem: not reliable for complex mazes with loops and multiple routes.
+- Explored a graph-based approach:
+  - Allows explicit tracking of nodes, branches and explored paths.
+  - Problem: requires a reliable method to identify when the robot has returned to an existing node.
+- Studied a coordinate-based maze-mapping approach using wheel encoders:
+  - Junctions are assigned coordinates and matched against previously visited coordinates within a tolerance.
+  - Branches can then be tracked as explored/unexplored and the complete maze can be represented as a graph.
+  - Dijkstra can subsequently be used to obtain the shortest path.
+  - Problem: requires reliable encoder integration, heading estimation and coordinate accuracy.
+- Also considered the additional complexity of correcting encoder distance for the robot's non-linear/zig-zag motion.
+- **Current status:** Final maze-solving architecture is not yet locked. We are continuing to evaluate the trade-offs between a simpler exploration approach and a coordinate/encoder-based graph-mapping approach before implementation.
+
 
